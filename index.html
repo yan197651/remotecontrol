@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remote-Controlled Blinds</title>
+    <!-- MediaPipe Camera Utils 用于开启摄像头 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --blind-height: 100%;
+            --blind-rotate: 0deg;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            overflow: hidden;
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        /* 窗框设计 */
+        .window-container {
+            position: relative;
+            width: 400px;
+            height: 550px;
+            background: #fff;
+            border: 12px solid #333;
+            border-radius: 12px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.2);
+            overflow: hidden;
+            background-image: linear-gradient(to bottom, #87CEEB, #E0F7FA);
+        }
+
+        /* 窗外风景 */
+        .scenery {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 100px;
+            background: #a5d6a7;
+            border-radius: 50% 50% 0 0;
+            filter: blur(2px);
+        }
+
+        /* 百叶窗容器 */
+        .blinds-wrapper {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: var(--blind-height);
+            display: flex;
+            flex-direction: column;
+            transition: height 1s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+
+        /* 单个叶片 */
+        .blind-slat {
+            flex: 1;
+            width: 100%;
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            box-sizing: border-box;
+            transform-origin: center;
+            transform: rotateX(var(--blind-rotate));
+            transition: transform 0.8s ease;
+        }
+
+        /* 摄像头画面预览 (左下角) */
+        #video-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 180px;
+            height: 135px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 4px solid #fff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            background: #000;
+        }
+
+        #input_video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        /* 迷你遥控器设计 (右上角) - 稍微调大了一点点 */
+        .remote-control {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 75px; 
+            padding: 10px;
+            background: #2d3436;
+            border-radius: 14px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 100;
+            border: 1px solid #636e72;
+        }
+
+        .remote-btn {
+            width: 100%;
+            height: 38px; /* 略微增加高度 */
+            border-radius: 8px;
+            border: none;
+            color: white;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #485460;
+            box-shadow: 0 3px 0 #1e272e;
+        }
+
+        .remote-btn:active {
+            transform: translateY(1px);
+            box-shadow: 0 1px 0 #1e272e;
+        }
+
+        .remote-label {
+            font-size: 7px;
+            color: #dfe6e9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: center;
+            margin-bottom: 0px;
+            opacity: 0.8;
+        }
+
+        /* 状态指示器 */
+        .status-badge {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 24px;
+            border-radius: 30px;
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(10px);
+            font-weight: 600;
+            color: #1f2937;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 100;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .dot.active {
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+
+    <!-- 顶部的系统状态 -->
+    <div class="status-badge">
+        <div id="status-dot" class="dot"></div>
+        <span id="status-text">Initializing camera…</span>
+    </div>
+
+    <!-- 迷你遥控器 -->
+    <div class="remote-control">
+        <div class="remote-label">CTRL</div>
+        <!-- 上三角按钮：开启 -->
+        <button class="remote-btn" onclick="setBlindsState(true)" title="开启">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+        </button>
+        <!-- 下三角按钮：关闭 -->
+        <button class="remote-btn" onclick="setBlindsState(false)" title="关闭">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+    </div>
+
+    <!-- 模拟窗户区域 -->
+    <div class="window-container">
+        <div class="scenery"></div>
+        <div class="scenery" style="left: 150px; height: 120px; background: #81c784;"></div>
+
+        <!-- 百叶窗主体 -->
+        <div id="blinds" class="blinds-wrapper">
+            <!-- 由脚本生成 25 个叶片 -->
+        </div>
+    </div>
+
+    <!-- 摄像头实时预览窗口 (左下角) -->
+    <div id="video-container">
+        <video id="input_video" playsinline></video>
+    </div>
+
+    <script>
+        const blindsContainer = document.getElementById('blinds');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const videoElement = document.getElementById('input_video');
+
+        // 初始化百叶窗叶片
+        const SLAT_COUNT = 25;
+        for (let i = 0; i < SLAT_COUNT; i++) {
+            const slat = document.createElement('div');
+            slat.className = 'blind-slat';
+            blindsContainer.appendChild(slat);
+        }
+
+        let isOpened = false;
+
+        // 执行开关窗逻辑
+        function setBlindsState(open) {
+            if (isOpened === open) return;
+            
+            isOpened = open;
+            if (isOpened) {
+                document.documentElement.style.setProperty('--blind-height', '10%');
+                document.documentElement.style.setProperty('--blind-rotate', '85deg');
+                statusText.innerText = "Window Open";
+            } else {
+                document.documentElement.style.setProperty('--blind-height', '100%');
+                document.documentElement.style.setProperty('--blind-rotate', '0deg');
+                statusText.innerText = "Window Closed";
+            }
+        }
+
+        // 启动摄像头控制
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {},
+            width: 640,
+            height: 480
+        });
+
+        camera.start().then(() => {
+            statusDot.classList.add('active');
+            statusText.innerText = "System Ready: You may use the remote control.";
+        }).catch(err => {
+            statusText.innerText = "Unable to access the camera. Please check your permissions.";
+        });
+    </script>
+</body>
+</html>
